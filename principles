@@ -1,0 +1,14 @@
+* Reliability, convenience, efficiency.
+
+* No one cares how fast your program gets the wrong answer.
+
+Even in real-time applications.
+
+* How come no one uses the phrase developtime cost?
+
+* Lisp is the assembly of lambda calculus.
+
+It is typeless, homoiconic, self-modifying code, and relies on macros. Sound familiar?
+Yes, it has garbage collection, but that's the only sensible response to economic pressures, whereas assembly can choose not to garbage collect its finite tape.
+
+* If you don't do enough testing, you'll still find the bugs, but only at the end.
