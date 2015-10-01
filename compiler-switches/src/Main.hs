@@ -10,8 +10,13 @@ import Control.Monad.State
 
 
 
-data TopStmt = Value Value
+data TopStmt =
+	  Value Value
+	| StaticIf CfgExpr [TopStmt] [TopStmt]
 data Value = Literal (Maybe String) String
+data CfgExpr =
+	  CfgIsSet String
+	| CfgEq String [String]
 
 instance Show Value where
 	show (Literal Nothing v) = show v
@@ -19,7 +24,7 @@ instance Show Value where
 
 
 type Alist k v = [(k, v)]
-data Cfg = BoolCfg Bool | StrCfg String
+type Cfg = Alist String String
 
 
 data Output = Output {
@@ -35,10 +40,22 @@ output0 = Output {
 
 
 
-newtype Compiler a = Compiler { unCompiler :: ReaderT (Alist String Cfg) (State Output) a }
+newtype Compiler a = Compiler { unCompiler :: ReaderT Cfg (State Output) a }
 	deriving (Functor, Applicative, Monad)
-runCompiler :: Alist String Cfg -> Compiler a -> Output
+runCompiler :: Alist String String -> Compiler a -> Output
 runCompiler cfg = flip execState output0 . flip runReaderT cfg . unCompiler
+
+staticIf :: CfgExpr -> Compiler Bool
+staticIf (CfgIsSet cfg) = Compiler $ do
+	str <- asks $ lookup cfg
+	return $ case str of
+		Nothing -> False
+		Just _ -> True
+staticIf (CfgEq cfg cmps) = Compiler $ do
+	str <- asks $ lookup cfg
+	return $ case str of
+		Nothing -> False
+		Just str -> str `elem` cmps
 
 emitStaticData :: Value -> Compiler ()
 emitStaticData v = Compiler $ modify $ \s ->
@@ -48,12 +65,16 @@ emitStaticData v = Compiler $ modify $ \s ->
 
 
 
-compile :: [TopStmt] -> Compiler ()
-compile [] = return ()
-compile (Value v:rest) = emitStaticData v >> compile rest
+compile :: TopStmt -> Compiler ()
+compile (Value v) = emitStaticData v
+compile (StaticIf p c a) = do
+	branch <- staticIf p
+	mapM_ compile $ if branch then c else a
 
 main :: IO ()
-main = print . runCompiler [] $ compile
-	[ Value (Literal Nothing "hello")
+main = print . runCompiler [("?", "Y")] $ mapM_ compile
+	[ StaticIf (CfgEq "?" ["yes", "Y"])
+		[ Value (Literal Nothing "hello") ]
+		[ Value (Literal Nothing "goodbye") ]
 	, Value (Literal (Just "i32") "123456")
 	]
