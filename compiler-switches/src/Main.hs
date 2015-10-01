@@ -17,6 +17,9 @@ data Value = Literal (Maybe String) String
 data CfgExpr =
 	  CfgIsSet String
 	| CfgEq String [String]
+	| CfgNot CfgExpr
+	| CfgAll [CfgExpr]
+	| CfgAny [CfgExpr]
 
 instance Show Value where
 	show (Literal Nothing v) = show v
@@ -56,6 +59,9 @@ staticIf (CfgEq cfg cmps) = Compiler $ do
 	return $ case str of
 		Nothing -> False
 		Just str -> str `elem` cmps
+staticIf (CfgNot expr) = not <$> staticIf expr
+staticIf (CfgAll exprs) = and <$> mapM staticIf exprs
+staticIf (CfgAny exprs) = or <$> mapM staticIf exprs
 
 emitStaticData :: Value -> Compiler ()
 emitStaticData v = Compiler $ modify $ \s ->
@@ -73,7 +79,7 @@ compile (StaticIf p c a) = do
 
 main :: IO ()
 main = print . runCompiler [("?", "Y")] $ mapM_ compile
-	[ StaticIf (CfgEq "?" ["yes", "Y"])
+	[ StaticIf (CfgAny [CfgNot $ CfgNot $ CfgIsSet "no", CfgEq "?" ["yes", "Y"]])
 		[ Value (Literal Nothing "hello") ]
 		[ Value (Literal Nothing "goodbye") ]
 	, Value (Literal (Just "i32") "123456")
