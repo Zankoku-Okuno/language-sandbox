@@ -6,6 +6,8 @@ Even in real-time applications.
 
 * How come no one uses the phrase developtime cost?
 
+* Conditional compilation should be left to the build system.
+
 * Lisp is the assembly of lambda calculus.
 
 It is typeless, homoiconic, self-modifying code, and relies on macros. Sound familiar?
