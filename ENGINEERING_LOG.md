@@ -86,6 +86,7 @@ As such, I have decided to select a few widely-implemented groups of primitive o
 A few more groups may be anticipated (such as for binary-coded decimal), and there may be additional formats added as computer science evolves, but several are left out intentionally.
 In particular, complex numbers are better understood as a type constructor (Complex i32, Complex f64, &c) than a single type, and the same goes for rational numbers and intervals of numbers.
 Further, characters and strings are encoding-dependent, rather than machine-dependent; I'd rather not select a particular encoding only to see it go obsolete, and bring the language with it.
+Finally, operations on fixed-point numbers are by design implemented with the same instructions as integers, with the exception of conversion routines.
 
 Given this small set of clear semantics, a general optimizer can make short work of reducing instruction sequences.
 A machine-specific optimizer can also be deployed whenever we want to squeeze yet more performance out.
