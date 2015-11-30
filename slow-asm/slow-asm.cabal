@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 executable slow-asm
   main-is:             Main.hs
-  other-modules:       VM
+  other-modules:       VM, Asm
   -- other-extensions:    
   build-depends:       base >=4.8 && <4.9,
                        containers ==0.5.*,

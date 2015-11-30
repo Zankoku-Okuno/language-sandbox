@@ -42,7 +42,7 @@ data Jump =
     | Call Atom [Arg] RetTo
     | TailCall Atom [Arg]
     | Return [Atom]
-    | Exit Atom [Arg]
+    | Exit Name [Atom]
     | Branch Atom Jump Jump
 
 data Atom =
@@ -50,8 +50,12 @@ data Atom =
     | Mem Addr
 
 data Arg = Arg Name Atom
+type JumpParams = (Name, [Name])
 
-data RetTo = RetTo Name [Name]
+data RetTo = RetTo {
+      stdRet :: JumpParams
+    , exitRets :: Map Name JumpParams
+}
 
 
 
@@ -72,12 +76,12 @@ data Frame = Frame {
 newtype VM a = VM { unVM :: StateT Machine IO a }
     deriving(Functor, Applicative, Monad, MonadIO)
 
-runVM :: [(Name, Block)] -> IO ([Value], Machine)
-runVM code = runStateT (unVM loop) $ MState {
+runVM :: Name -> Map Name Block -> IO ([Value], Machine)
+runVM entry code = runStateT (unVM loop) $ MState {
       stack = [Frame { locals = Map.empty, returnPtr = Nothing }]
     , globals = Map.empty
-    , instrPtr = (fromJust $ lookup "main" code, 0)
-    , code = Map.fromList code
+    , instrPtr = (fromJust $ Map.lookup entry code, 0)
+    , code = code
 }
 
 loop :: VM [Value]
@@ -115,28 +119,35 @@ jump (Call pretarget preargs ret) = do
     (block', args) <- prepGotoArgs pretarget preargs
     let frame' = Frame { locals = Map.empty, returnPtr = Just ret }
     VM $ modify $ \s -> s { stack = frame' : stack s }
-    goto block' Nothing
+    goto block' (Just args)
 jump (TailCall pretarget preargs) = do
     (block', args) <- prepGotoArgs pretarget preargs
     (frame0:stack0) <- VM $ gets stack
     let frame' = frame0 { locals = args }
     VM $ modify $ \s -> s { stack = frame' : stack0 }
-    goto block' Nothing
+    goto block' (Just args)
 jump (Return prerets) = do
-    target_m <- VM $ gets $ returnPtr . head . stack
-    case target_m of
+    retPtr_m <- VM $ gets $ returnPtr . head . stack
+    case retPtr_m of
         Nothing -> Just <$> mapM resolveAtom prerets
-        Just (RetTo target retparams) -> do
+        Just (RetTo (target, retparams) _) -> do
             (Just block') <- VM $ gets $ Map.lookup target . code
             rets <- mapM resolveAtom prerets
-            when (length retparams /= length rets) $ error "wrong number of return values"
-            let args = Map.fromList $ zip retparams rets
+            let args = if length retparams == length rets
+                            then Map.fromList $ zip retparams rets
+                            else error "wrong number of return values"
             VM $ modify $ \s -> s { stack = tail $ stack s }
             goto block' (Just args)
-jump (Exit pretarget preargs) = do
-    (block', args) <- prepGotoArgs pretarget preargs
+jump (Exit pretarget preexits) = do
+    (Just retPtr) <- VM $ gets $ returnPtr . head . stack
+    let Just (target, exitparams) = Map.lookup pretarget (exitRets retPtr)
+    (Just block') <- VM $ gets $ Map.lookup target . code
+    exits <- mapM resolveAtom preexits
+    let args = if length exitparams == length exits
+                    then Map.fromList $ zip exitparams exits
+                    else error "wrong number of exit values"
     VM $ modify $ \s -> s { stack = tail $ stack s }
-    goto block' (Just args) --FIXME the callee can't know whether it's clobbering the caller's namespace
+    goto block' (Just args)
 
 resolveAtom :: Atom -> VM Value
 resolveAtom (Mem (Local x)) = VM $ gets $ fromJust . Map.lookup x . locals . head . stack
