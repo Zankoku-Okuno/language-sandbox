@@ -11,7 +11,7 @@ Rather than simply delete it and lose the associated thoughts, I will transfer i
 
 A basic problem in the design of low-level languages is the question of primitives:
 
- * A portable language needs to expose primitive types and operations suitable for programmers.
+ * A portable language needs to expose primitive types and operations suitable for programmers without reference to the hardware that implement them.
 
  * A low-level language must expose primitive types and operations which can be mapped directly (or else very closely) onto hardware.
 
@@ -53,14 +53,14 @@ The compiler could then exhaustively check all conditional compilation branches 
 
 My first inkling that this could not happen was scoping rules.
 If a function could be conditionally defined or declared, the compiler would need to track not only information about the function's name and type, but also the conditions under which the function is available for use.
-That would not be a particularly difficult barrier on its own, but the conditions user might resonably define could be highly complex.
+That would not be a particularly difficult barrier on its own, but the conditions the user might resonably define could be highly complex.
 The compiler would not have a mere handful of possible targets, but a multitude:
 even in x86 programming, someone might wish to condition their code depending on the multimedia extensions available on a particular processor model.
 This goes well beyond the bounds of enumerating a few architectures and opertating systems.
 
-Thinking more on this topic, I decided that only the maintainers of a project has the ability to test the implementation against multiple targets.
+Thinking more on this topic, I decided that only the maintainers of a project have the ability to test the implementation against multiple targets.
 Furthermore, the maintainers can decide for themselves how broad or detailed their requirements go.
-Finally, since any compiler I envisage must be a cross-compiler through-and-through (like the Plan 9 C compiler), the writer should be able to simply attempt compilation onto all desired targets using a single machine.
+Finally, since any compiler I envisage must be a cross-compiler through-and-through (like the Plan 9 C compiler), the writer should be able to simply attempt compilation onto all desired targets from their development machine.
 That is, built-in portability testing adds complexity, but no value, to a well-designed compiler.
 
 ### Primitive Types
@@ -100,3 +100,75 @@ For a machine to target a data type we need only:
 The question of bits also becomes important if we wish to represent bitfields.
 Indeed, in a systems programming language, we probably must allow bitfields.
 Even if we don't allow the full power of bitfields, packing multiple boolean flags into a single word will require some consideration of individual bits.
+
+
+
+
+## 28 Nov 2015
+
+I've developed a new virtual machine without an instruction set architecture.
+
+The VM is a Harvard architecture (no self-modifying code).
+This was done because there is no set ISA, so a homoiconic format would require extra work, such as specifying the ISA before executing.
+
+Memory consists merely of a mapping from names to values.
+Within each region, memory is manually managed.
+
+There is a global memory which is saved across procedure calls.
+There is also a stack, each frame of which contains another region of memory.
+During a procedure call, the caller's frame's memory is saved and is not altered until function return.
+During procedure return, the locations where return values land is given explicitly by the caller, rather than assumed by the callee.
+
+What this means is essentially that we have a pure register machine.
+Also, since all registers are saved, we have no need for procudeure call prologue/epilogue.
+
+### Calling Conventions
+
+It is usual for the callee to know ahead-of-time where to place its return values.
+It is then the responsibility of the caller to ensure that the locations where return values may end up are clear for the callee's use.
+
+In this architecture, we have managed to avoid issues of clobbering in every place except function return.
+It would therefore make sense if function return also avoided clobbering.
+To do so, we have inverted the usual call return conventions: locations in which return values are to be placed are given explicitly by the caller, rather than assumed by the callee.
+
+To date, we have not been able to acheive the same for abnormal returns (exits), simply because I'm not sure where to locate the required data.
+
+### Stack
+
+In this architecture, every piece of data, even very-short-lived temporary data, is given a name by the user.
+It certainly would be expedient for the user to have a "redzone" stack for these temporaries.
+However, if this VM is mean to be used by a compiler, then these person-friendly features are of no consequence, except that they increase the complexity of the interpreter.
+
+### Exit Chaining
+
+I was thinking about safe arithmetic (i.e. arithmetic which detects overflow and redirects to an error handler).
+Each safe operation needs to be informed where to go on error.
+
+My thought was that, in addition to the input parameters and the return parameters, procedures would also need to specify exit parameters, which would just be passed a pointer to the relevant cleanup code.
+
+In the case of an inlined or primitive operation, it is simple to find out where to place any exit arguments.
+However, if exiting requires removing a stack frame, it is no longer obvious where to place the exit parameters.
+Therefore, we will need some sort of calling convention for these exit parameters.
+
+It is best to start from the simplest solution, a stack-based convention, then add complexity from there.
+When we exit, we dump the parameters onto the top of the stack.
+From there, the arguments can be disbursed into faster memory.
+When we call a passed exit, we will always put the arguments on the stack.
+However, if the target handler can be optimized to take advantage of some already allocated variables, that would screw up any attempt to pass the handler to another function.
+Therefore, instead of passing the handler directly, invent a new handler to pass along; it will move the arguments from the stack into optimized positions before jumping to the real handler.
+If the types of some arguments are small enough, we can pass those in registers.
+
+### Shared Registers
+
+At the moment, every register is saved/restored over function calls.
+Simulating registers for real machine would require a global set of registers which are not altered across function calls.
+This could be accomplished in two ways.
+
+First, add an additional memory mapping from register names to values.
+This would not be altered during a call/return.
+
+Second, reserve part of the existing global memory for these registers, since global memory is already not altered across a call.
+
+The second choice appears better for two reasons:
+1) it does not add any additional implementation complexity, and
+2) some architectures allow registers to be addressed, which we get for free.
