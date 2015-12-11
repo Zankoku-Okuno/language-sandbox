@@ -17,20 +17,13 @@ runTc action env = runST $ runReaderT (unTc action) env
 
 
 data Env = Env
-    { abi :: [(AbiName, Type)]
-    , vars :: [(VarName, Type)]
+    { vars :: [(VarName, Type)]
     }
 
 typeOfVar :: VarName -> Tc s (Maybe Type)
 typeOfVar x = do
     env <- Tc $ ask
-    let fromAbi = lookup x (abi env)
-        fromVar = lookup x (vars env)
-    pure $ case (fromAbi, fromVar) of
-        (Just _, Just _) -> error "INTERNAL ERROR: name defined in both abi and vars"
-        (Nothing, Nothing) -> Nothing
-        (t, Nothing) -> t
-        (Nothing, t) -> t
+    pure $ lookup x (vars env)
 
 withVar :: (VarName, Type) -> Tc s a -> Tc s a
 withVar binding (Tc action) = Tc $ withReaderT addVar action
@@ -57,9 +50,36 @@ tcExpr expect (NumLit i (Just annotatedType)) = do
             Nothing -> error "ambiguous type for numeral"
             Just t -> pure t
     pure (tc, TcNumLit i t)
+tcExpr expect (Var x) = do
+    t <- lookup x . vars <$> Tc ask >>= \case
+            Nothing -> error $ "undefined variable `" ++ x ++ "'"
+            Just t -> pure t
+    tc <- unify expect (toTcType t)
+    pure (tc, TcVar x)
 tcExpr expect (Block stmts) = do
     (tc, tcStmts) <- tcBlock expect stmts
     pure (tc, TcBlock tcStmts)
+tcExpr expect (Call f args) = do
+    args' <- tcArgs args
+    let expectF = TcFunArgsType_ args' expect -- NOTE [TcFunArgsType]
+    (TcFunType argSigs retType, f') <- tcExpr expectF f
+    let argList = mapArgs args' argSigs
+    pure (retType, TcCall f' argList)
+    where
+    mapArgs :: TcArgs s -> [TcArgSig s] -> [TcExpr]
+    mapArgs (TcArgs ((_, e):poss) kws) (_ : cdr) =
+        e : mapArgs (TcArgs poss kws) cdr
+    mapArgs (TcArgs [] kws) ((TcArgSig name _) : cdr) =
+        e : mapArgs (TcArgs [] kws') cdr
+        where
+        (e, kws') = go kws
+        go [] = error "INTERNAL ERROR: tcExpr(Call).mapArgs.go"
+        go (car@(kw, (_, e)):cdr)
+            | kw == name = (e, cdr)
+            | otherwise = let (e, kws') = go cdr in (e, car:kws')
+    mapArgs (TcArgs [] []) [] = []
+    mapArgs _ _ = error "INTERNAL ERROR: tcExpr(Call).mapArgs"
+
 
 tcBlock :: TcType s -> [Stmt] -> Tc s (TcType s, [TcStmt])
 tcBlock expect [] = error "empty block"
@@ -76,27 +96,45 @@ tcBlock expect (Expr e:stmts) = do
         Just t -> pure ()
     (tc, tcStmts) <- tcBlock expect stmts
     pure (tc, TcExpr tcExpr : tcStmts)
-tcBlock expect (Var x e t : stmts) = do
-    (varDef, varType) <- tcVar t e
+tcBlock expect (VarStmt x e t : stmts) = do
+    (varDef, varType) <- tcVarStmt t e
     (tc, tcStmts) <- withVar (x, varType) $ tcBlock expect stmts
-    pure (tc, TcVar x varDef varType : tcStmts)
+    pure (tc, TcVarStmt x varDef varType : tcStmts)
 
-tcVar :: Maybe Type -> Maybe Expr -> Tc s (Maybe TcExpr, Type)
-tcVar Nothing Nothing = error "INTERNAL ERROR: var without type or expression"
-tcVar Nothing (Just e) = do
+tcVarStmt :: Maybe Type -> Maybe Expr -> Tc s (Maybe TcExpr, Type)
+tcVarStmt Nothing Nothing = error "INTERNAL ERROR: var without type or expression"
+tcVarStmt Nothing (Just e) = do
     mvar <- newMetaVar
     (tc, tcExpr) <- tcExpr mvar e
     t <- concretize mvar >>= \case
             Nothing -> error "ambiguous type for variable declaration"
             Just t -> pure t
     pure (Just tcExpr, t)
-tcVar (Just t) Nothing = pure (Nothing, t)
-tcVar (Just t) (Just e) = do
+tcVarStmt (Just t) Nothing = pure (Nothing, t)
+tcVarStmt (Just t) (Just e) = do
     (tc, tcExpr) <- tcExpr (toTcType t) e
     let t = fromTcType tc
     pure (Just tcExpr, t)
 
+tcArgs :: Args -> Tc s (TcArgs s)
+tcArgs (Args { posArgs = poss, kwArgs = kws }) = do
+    tcPoss <- mapM tcPosArg poss
+    tcKws <- mapM tcKwArg kws
+    pure $ TcArgs
+        { posTcArgs = tcPoss
+        , kwTcArgs = tcKws
+        }
+    where
+    tcPosArg e = do
+        mvar <- newMetaVar
+        tcExpr mvar e
+    tcKwArg (kw, e) = do
+        mvar <- newMetaVar
+        tc <- tcExpr mvar e
+        pure (kw, tc)
 
+
+-- NOTE [TcFunArgsType]
 unify :: TcType s -> TcType s -> Tc s (TcType s)
 unify t1@(TcMetaVar s1) t2@(TcMetaVar s2) = do
     t1_m <- Tc . lift $ readSTRef s1
@@ -120,8 +158,45 @@ unify (TcMetaVar s1) t2 = do
             pure tc
         Just t1 -> unify t1 t2
 unify t1 t2@(TcMetaVar _) = unify t2 t1
+unify t1 t2@(TcFunArgsType_ _ _) = unify t2 t1
 unify TcU8 TcU8 = pure TcU8
-unify TcU8 _ = error "TODO can't match U8 with whatever"
+unify TcU8 _ = error "can't match U8 with whatever"
+unify (TcFunArgsType_ args1 ret1) fType@(TcFunType args2 ret2) = do
+    unifyArgs args1 args2
+    unify ret1 ret2
+    pure fType
+    where
+    unifyArgs :: TcArgs s -> [TcArgSig s] -> Tc s ()
+    unifyArgs (TcArgs (pos:poss) kwArgs) args2 = do
+        restArgs <- unifyPosArg pos args2
+        unifyArgs (TcArgs poss kwArgs) restArgs
+        where
+        unifyPosArg :: (TcType s, TcExpr) -> [TcArgSig s] -> Tc s [TcArgSig s]
+        unifyPosArg (t1, _) ((TcArgSig _ t2):rest) = do
+            unify t1 t2
+            pure rest
+        unifyPosArg _ [] = error "can't match FunArgs with whatever (pos)"
+    unifyArgs (TcArgs [] (kwArg:kwArgs)) args2 = do
+        restArgs <- unifyKwArg kwArg args2
+        unifyArgs (TcArgs [] kwArgs) restArgs
+        where
+        unifyKwArg :: (ArgName, (TcType s, TcExpr)) -> [TcArgSig s] -> Tc s [TcArgSig s]
+        unifyKwArg kwArg@(argName1, (t1, _)) (sig@(TcArgSig argName2 t2):rest)
+            | argName1 == argName2 = do
+                unify t1 t2
+                pure rest
+                --TODO sanity check
+                --case lookup argName1 rest of
+                --    Nothing -> pure rest
+                --    Just _ -> error "INTERNAL ERROR: duplicate kwArgs in function signature"
+            | otherwise = do
+                rest' <- unifyKwArg kwArg rest
+                pure $ sig : rest'
+        unifyKwArg _ [] = error "can't match FunArgs with whatever (kw)"
+    unifyArgs (TcArgs [] []) [] = pure ()
+    unifyArgs _ _ = error "can't match FunArgs with whatever"
+
+unify (TcFunArgsType_ _ _) _ = error "can't match FunType with whatever"
 
 concretize :: TcType s -> Tc s (Maybe Type)
 concretize (TcMetaVar cell) = do
@@ -137,20 +212,29 @@ concretize t = pure . Just $ fromTcType t
 data TcType s
     = TcU8 -- TODO replace with PrimType, make u8 available as a nominal type
     | TcFunType [TcArgSig s] (TcType s)
+    | TcFunArgsType_ (TcArgs s) (TcType s) -- NOTE [TcFunArgsType]
     | TcMetaVar (STRef s (Maybe (TcType s)))
+    -- TODO TcOverloaded [Type]
 data TcArgSig s = TcArgSig
     { tcArgName :: VarName
     , tcArgType :: TcType s
     -- TODO arg modifiers, like implicit
     }
+data TcArgs s = TcArgs
+    { posTcArgs :: [(TcType s, TcExpr)]
+    , kwTcArgs :: [(ArgName, (TcType s, TcExpr))]
+    }
+
 
 data TcExpr
     = TcNumLit Integer Type -- TODO use Rational instead of Integer
+    | TcVar AbiName
+    | TcCall TcExpr [TcExpr]
     | TcBlock [TcStmt]
     deriving (Eq, Show)
 data TcStmt
     = TcExpr TcExpr
-    | TcVar VarName (Maybe TcExpr) Type
+    | TcVarStmt VarName (Maybe TcExpr) Type
     deriving (Eq, Show)
 
 data TcDirective
@@ -165,3 +249,14 @@ toTcType (FunType args ret) = TcFunType (map toTcArgs args) (toTcType ret)
 
 fromTcType :: TcType s -> Type
 fromTcType TcU8 = U8
+
+
+
+-- NOTE [TcFunArgsType]
+-- --------------------
+-- This is only for use when type-checking funciton calls.
+-- By the time you're done checking a call, the TcFunArgsType_ should disappear.
+-- 
+-- invariant: `unify` never returns a TcFunArgsType_
+-- invariant: the `tc*` functions never return a TcFunArgsType_
+-- invariant: `unify` is never called with two TcFunArgsType_

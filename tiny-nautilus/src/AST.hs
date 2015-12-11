@@ -5,6 +5,7 @@ type AbiName = String
 type VarName = String
 type TypeName = String
 type TypeVar = String
+type ArgName = String
 type FieldName = String
 
 ------ primitive data types --------
@@ -31,14 +32,21 @@ data ArgSig = ArgSig
     -- TODO arg modifiers, like implicit
     }
     deriving (Eq, Show)
+data Args = Args
+    { posArgs :: [Expr]
+    , kwArgs :: [(ArgName, Expr)]
+    }
+    deriving (Eq, Show)
 
 data Expr
     = NumLit Integer (Maybe Type) -- TODO use Rational instead of Integer
+    | Var VarName
+    | Call Expr Args
     | Block [Stmt]
     deriving (Eq, Show)
 data Stmt
     = Expr Expr
-    | Var VarName (Maybe Expr) (Maybe Type)
+    | VarStmt VarName (Maybe Expr) (Maybe Type)
     deriving (Eq, Show)
 
 data Directive
