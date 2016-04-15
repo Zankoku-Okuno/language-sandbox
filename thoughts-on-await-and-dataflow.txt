@@ -1,0 +1,42 @@
+I had thought about await as a initializer thing:
+```
+var a = await sometask();
+return a.foo;
+```
+
+when waiting on multiple tasks at once, explicit dataflow could be more efficient
+(rather than waiting on one, then the next, and the next, ...)
+```
+await { a = task_a(); 
+        b = task_b(); };
+return a+b;
+```
+
+however, there's nothing stopping await from being an expression
+```
+return (await sometask()).foo;
+```
+and we could have multiple awaits between sequence points, so dataflow can be used
+```
+return (await task_a())+(await task_b());
+```
+
+The dilemma is:
+	make programmers understand sequence points but not worry about dataflow explicity
+	make programmers think about their dataflow, but not worry about sequence points
+acutally, the answer presents itself readily:
+	the programmer wants to do dataflow parallelism, not sequence points
+	therefore, explicit dataflow statements
+furthermore, we can probably still use await in an expression and translate it into the explicit form
+
+in fact, if we have sugar to merge multiple awaits in a row, the explicit await example could be written:
+```
+await a = task_a();
+await b = task_b();
+return a+b;
+```
+but still be dataflow
+
+
+unfortunately, questions of making closures and allocating threads are exactly what I want to avoid in this language design (push it to the programmer)
+promises are hard to manage w/o a garbage collector or lifetime tracking, so perhaps these are best handled by a user library

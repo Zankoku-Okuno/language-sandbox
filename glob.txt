@@ -1,0 +1,39 @@
+module Lanugage.Glob where
+
+data Glob s =
+      Literal [s]
+    | AnyOne
+    | AnyMany
+    | AnyManyPath
+    | InSet [s]
+    | OutOfSet [s]
+
+-- FIXME yeah... not unless s is string
+--instance Show s => Show (Glob s) where
+--    show (Literal s) = concatMap show s -- FIXME escape special characters ?*[\
+--      where
+--      escape c | c `elem` "?*[\\" = '\\':c:[]
+--               | otherwise = c:[]
+--    show AnyOne = "?"
+--    show AnyMany = "*"
+--    show AnyManyPath = "**"
+--    show (InSet s) = "[" ++ concatMap show s ++ "]" -- FIXME escape special characters ]!
+--    show (OutOfSet s) = "[!" ++ concatMap show s ++ "]" -- FIXME escape special characters ]
+
+
+deleteFront,
+deleteFrontLong,
+deleteBack,
+deleteBackLong :: [s] -> Glob s -> [s]
+
+replaceFirst,
+replaceAll,
+replaceFront,
+replaceBack :: [s] -> Glob s -> [s] -> [s]
+-- TODO short/long
+
+extractFirst,
+extractFront,
+extractLast :: [s] -> Glob s -> Maybe [s]
+extractAll :: [s] -> Glob s -> [[s]]
+-- TODO short/long
