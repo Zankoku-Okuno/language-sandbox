@@ -1,0 +1,59 @@
+formats
+	fix
+		unsigned
+		signed
+			2's complement
+			sign bit
+			1's complement
+			offset
+	float
+		binary
+		decimal
+	addr
+		addr
+		offset
+modes
+	fixed
+		wrap around
+		carry
+		check overflow
+		saturate
+	float
+		<from IEEE>
+
+a useful thing to have for performance control to have types for cahce lines:
+	cache_L1_t, cache_L2_t, ...
+probably no use as data
+we can divide cache_line_Lx_t by the size of an object to find the best (minimal factor of) block size
+it means your binary is tailored to a cache size, other archs will suffer performance-wise
+	but that's just it: the cach is part of the documented architecture!
+then again, cache-oblivious algos...
+
+
+
+
+fixpoint
+
+inc, dec, neg, abs :: bits[N] -> bits[N], bit
+add, sub :: bits[N] -> bits[N] -> bits[N], bit
+umul, imul, udivrem, idivrem :: bits[N] -> bits[N] -> bits[N][2]
+umull, umull, udiv, idiv, urem, irem :: bits[N] -> bits[N] -> bits[N], bit
+shl, shr, rotl :: bits[N] -> 0<=n<N -> bits[N]
+sext, zext :: bits[N] -> bits[M>N]
+trunc :: bits[N] -> bits[M<N]
+invert :: bits[N] -> bits[N]
+ifz, ifnz :: bits[N] -> bit
+and, or :: bits[N] -> bits[N] -> bits[N]
+MAX, MIN :: bits[N]
+popcnt, ffz, ffs, flz, fls
+
+
+address/offset
+
+offset :: addr -> offset -> addr
+scale :: offset -> uintptr -> offset
+alignto :: addr -> n -> addr
+
+
+synonyms:
+word, int, uintptr, intptr
